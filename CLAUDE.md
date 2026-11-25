@@ -16,6 +16,11 @@ Untermenü liegt links vom Menü, „Beenden“ ca. 35 pt unter der Zeile.
 **Messung:** `top -l 2 -s 1 -stats pid,cpu,mem,power,uid,ppid,command` – zweiter Durchlauf zählt
 (der erste hat keine CPU-Differenz). `power` ist dieselbe Energiespalte wie in der Aktivitätsanzeige.
 
+**Sortieren:** Kopfzeile ist eine eigene `HeaderView` im Menüeintrag. Klick auf Energie/CPU/RAM setzt
+`sortKey` (UserDefaults, Rückfall auf altes `sortCPU`) und baut das Menü bei offenem Zustand bewusst neu.
+Spalten stehen rechtsbündig bei `HeaderView.textX` + Tabstopp (250/320/390); `textX` = 45 pt ist am
+Bildschirmfoto gemessen. Ändert sich die Zeilenformatierung, Kopf und Werte neu gegeneinander messen.
+
 ## Fallen
 - **Menü nie umbauen, solange es offen ist.** Sonst sortieren sich Zeilen unter dem Mauszeiger um
   und man beendet das falsche Programm (so fast Claude erwischt, 07.11.2026). `menuOpen` prüfen.
@@ -24,4 +29,6 @@ Untermenü liegt links vom Menü, „Beenden“ ca. 35 pt unter der Zeile.
 - Eigener `top`-Prozess über `ppid == eigene PID` ausblenden, sonst steht „top“ in der Liste.
 - `pid 0` (kernel_task) hat keinen Pfad: Name aus der top-COMMAND-Spalte (steht zuletzt in -stats,
   weil er Leerzeichen enthalten kann).
+- Klick-Test im offenen Menü: `cliclick c:` springt ohne Bewegung, das Menü schließt sich dann ohne
+  Klick. Erst `m:` daneben, dann `m:` aufs Ziel, dann `dd:.` und `du:.` getrennt.
 - Titel in der Leiste: Summe aller Prozess-CPU durch Kernzahl, sonst stehen 93 % da.

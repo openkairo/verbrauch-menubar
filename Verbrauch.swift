@@ -14,6 +14,63 @@ struct AppGroup {
     var ownUser = true                 // alle Prozesse gehören dem angemeldeten Benutzer
 }
 
+// Spaltenköpfe im Menü: „Energie“, „CPU“, „RAM“ sind anklickbar und sortieren die Liste.
+// Eine eigene View im Menüeintrag bekommt Klicks, ohne dass sich das Menü schließt.
+final class HeaderView: NSView {
+    // Linke Kante des Zeilentexts im Menü (nach dem 16-pt-Symbol); die Werte stehen rechtsbündig
+    // an den Tabstopps 250/320/390 dahinter. Gemessen am Bildschirmfoto, siehe CLAUDE.md.
+    static let textX: CGFloat = 45
+    static let cols: [(key: String, title: String, tab: CGFloat)] = [("power", "Energie", 250), ("cpu", "CPU", 320), ("mem", "RAM", 390)]
+    var active = "power"
+    var hover: String?
+    var onPick: ((String) -> Void)?
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        autoresizingMask = [.width]
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseMoved, .mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+                                       owner: self, userInfo: nil))
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    func column(at x: CGFloat) -> String? {
+        for c in Self.cols {
+            let right = Self.textX + c.tab
+            if x >= right - 62 && x <= right + 8 { return c.key }
+        }
+        return nil
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let font = NSFont.systemFont(ofSize: 11, weight: .semibold)
+        let dim = NSColor.secondaryLabelColor
+        func put(_ t: String, rightAt r: CGFloat? = nil, x: CGFloat = 0, color: NSColor, f: NSFont = font) {
+            let a: [NSAttributedString.Key: Any] = [.font: f, .foregroundColor: color]
+            let sz = (t as NSString).size(withAttributes: a)
+            let px = r.map { $0 - sz.width } ?? x
+            (t as NSString).draw(at: NSPoint(x: px, y: (bounds.height - sz.height) / 2), withAttributes: a)
+        }
+        put("Programm", x: 21, color: dim)
+        for c in Self.cols {
+            let on = c.key == active
+            let col: NSColor = on ? .controlAccentColor : (c.key == hover ? .labelColor : dim)
+            put(on ? c.title + " ▾" : c.title, rightAt: Self.textX + c.tab, color: col,
+                f: NSFont.systemFont(ofSize: 11, weight: on ? .bold : .semibold))
+        }
+    }
+
+    override func mouseMoved(with e: NSEvent) {
+        let h = column(at: convert(e.locationInWindow, from: nil).x)
+        if h != hover { hover = h; needsDisplay = true }
+    }
+    override func mouseExited(with e: NSEvent) { hover = nil; needsDisplay = true }
+    override func mouseUp(with e: NSEvent) {
+        guard let k = column(at: convert(e.locationInWindow, from: nil).x) else { return }
+        active = k; needsDisplay = true
+        onPick?(k)
+    }
+}
+
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     let menu = NSMenu()
@@ -23,10 +80,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var sampling = false
     var menuOpen = false
     let loginItem = NSMenuItem(title: "Bei Anmeldung starten", action: #selector(toggleLogin), keyEquivalent: "")
-    let sortItem = NSMenuItem(title: "Nach CPU sortieren", action: #selector(toggleSort), keyEquivalent: "")
-    var sortByCPU: Bool {
-        get { UserDefaults.standard.bool(forKey: "sortCPU") }
-        set { UserDefaults.standard.set(newValue, forKey: "sortCPU") }
+    lazy var header: NSMenuItem = {
+        let m = NSMenuItem()
+        let v = HeaderView(frame: NSRect(x: 0, y: 0, width: 500, height: 22))
+        v.active = sortKey
+        v.onPick = { [weak self] key in self?.pickSort(key) }
+        m.view = v
+        return m
+    }()
+    // Sortierung: "power" (Energie), "cpu" oder "mem" – per Klick auf den Spaltenkopf
+    var sortKey: String {
+        get {
+            let d = UserDefaults.standard
+            if let k = d.string(forKey: "sortKey") { return k }
+            return d.bool(forKey: "sortCPU") ? "cpu" : "power"   // alte Einstellung übernehmen
+        }
+        set { UserDefaults.standard.set(newValue, forKey: "sortKey") }
     }
 
     func applicationDidFinishLaunching(_ n: Notification) {
@@ -37,7 +106,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.delegate = self
         item.menu = menu
         loginItem.target = self
-        sortItem.target = self
         if !UserDefaults.standard.bool(forKey: "autostartEingerichtet") {
             UserDefaults.standard.set(true, forKey: "autostartEingerichtet")
             try? SMAppService.mainApp.register()
@@ -186,16 +254,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.removeAllItems()
         let head = NSMenuItem(title: sysLine, action: nil, keyEquivalent: ""); head.isEnabled = false
         menu.addItem(head)
-        let ps = NSMutableParagraphStyle()
-        ps.tabStops = [NSTextTab(textAlignment: .right, location: 250), NSTextTab(textAlignment: .right, location: 320),
-                       NSTextTab(textAlignment: .right, location: 390)]
-        let cols = NSMenuItem(title: "", action: nil, keyEquivalent: ""); cols.isEnabled = false
-        cols.attributedTitle = NSAttributedString(string: "Programm\tEnergie\tCPU\tRAM",
-            attributes: [.font: NSFont.systemFont(ofSize: 11, weight: .semibold), .paragraphStyle: ps,
-                         .foregroundColor: NSColor.secondaryLabelColor])
-        menu.addItem(cols)
+        (header.view as? HeaderView)?.active = sortKey
+        header.view?.needsDisplay = true
+        menu.addItem(header)
         menu.addItem(.separator())
-        let sorted = groups.sorted { sortByCPU ? $0.cpu > $1.cpu : $0.power > $1.power }
+        let key = sortKey
+        let sorted = groups.sorted {
+            switch key {
+            case "cpu": return $0.cpu > $1.cpu
+            case "mem": return $0.memMB > $1.memMB
+            default:    return $0.power > $1.power
+            }
+        }
         var shown = 0
         for g in sorted {
             // Nur, was spürbar verbraucht: GUI-Programme immer, Hintergrund nur ab 1 % oder 1 Energie
@@ -225,8 +295,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             menu.addItem(mi)
         }
         menu.addItem(.separator())
-        sortItem.state = sortByCPU ? .on : .off
-        menu.addItem(sortItem)
         loginItem.state = SMAppService.mainApp.status == .enabled ? .on : .off
         menu.addItem(loginItem)
         let act = NSMenuItem(title: "Aktivitätsanzeige öffnen", action: #selector(openActivity), keyEquivalent: ""); act.target = self
@@ -272,7 +340,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                            configuration: .init(), completionHandler: nil)
     }
 
-    @objc func toggleSort() { sortByCPU.toggle(); rebuildMenu() }
+    // Klick auf einen Spaltenkopf: bewusst gewollt, daher darf sich die Liste auch bei offenem Menü
+    // neu ordnen. Automatische Messungen bauen das offene Menü weiterhin nicht um.
+    func pickSort(_ key: String) {
+        guard key != sortKey else { return }
+        sortKey = key
+        rebuildMenu()
+    }
 
     @objc func toggleLogin() {
         let svc = SMAppService.mainApp

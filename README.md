@@ -8,7 +8,7 @@ direkt aus dem Menü (normal oder erzwungen). Ergänzt das Apple-Batteriemenü, 
 ![Menü](screenshot-menu.png)
 
 - Energie-Spalte = Energieeinfluss wie in der Aktivitätsanzeige (`top`-Spalte POWER)
-- Sortierung nach Energie oder CPU, Autostart per Anmeldeobjekt
+- Sortierung per Klick auf die Spaltenköpfe Energie, CPU oder RAM (Menü bleibt offen), Autostart per Anmeldeobjekt
 - Systemprozesse anderer Benutzer werden angezeigt, aber nicht beendbar
 
 Bauen und installieren: `./build.sh` (Ergebnis in `dist/Verbrauch.app`, wird nach `/Applications` kopiert).
